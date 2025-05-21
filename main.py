@@ -156,6 +156,8 @@ class MainWindow(QMainWindow):
                         self.transition_slider.setValue(val)
                 self.current_cue_key = self.blinde_active_cue_key
                 self.cue_name_input.setText(cue_data["name"])
+                # выделить текущую Cue в списке
+                self.score_window.select_cue_by_id(self.current_cue_key)
             except Exception as e:
                 print(f"Ошибка восстановления Cue: {e}")
 
@@ -338,6 +340,17 @@ class ScoreWindow(QDialog):
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
             self.reload_list()
+
+    def select_cue_by_id(self, cue_id):
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = list(json.load(f).items())
+            for idx, (key, _) in enumerate(data):
+                if key == cue_id:
+                    self.list_box.setCurrentRow(idx)
+                    break
+        except Exception as e:
+            print(f"Ошибка выделения Cue: {e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
