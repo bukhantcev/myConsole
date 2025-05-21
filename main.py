@@ -8,6 +8,7 @@ from pyartnet import ArtNetNode
 from PyQt5.QtWidgets import QLineEdit, QLabel
 import json
 from PyQt5.QtWidgets import QDialog, QListWidget
+from PyQt5.QtWidgets import QMenu, QAction
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -163,6 +164,9 @@ class ScoreWindow(QDialog):
         self.list_box.itemDoubleClicked.connect(self.activate_cue)
         self.list_box.installEventFilter(self)
 
+        self.list_box.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_box.customContextMenuRequested.connect(self.show_context_menu)
+
         self.reload_list()
 
     def reload_list(self):
@@ -233,6 +237,34 @@ class ScoreWindow(QDialog):
                     self.activate_cue(self.list_box.currentItem())
                 return True
         return super().eventFilter(source, event)
+
+    def show_context_menu(self, position):
+        item = self.list_box.itemAt(position)
+        if item is None:
+            return
+        menu = QMenu()
+        delete_action = QAction("Удалить", self)
+        delete_action.triggered.connect(lambda: self.delete_cue(item))
+        menu.addAction(delete_action)
+        menu.exec_(self.list_box.viewport().mapToGlobal(position))
+
+    def delete_cue(self, item):
+        cue_index = self.list_box.row(item)
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = list(json.load(f).items())
+        except FileNotFoundError:
+            return
+
+        if cue_index < len(data):
+            cue_id, _ = data[cue_index]
+            data.pop(cue_index)
+            data = dict(data)
+
+            with open("score.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            self.reload_list()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
