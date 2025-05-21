@@ -67,13 +67,28 @@ class MainWindow(QMainWindow):
         self.update_cue_button.clicked.connect(self.update_current_cue)
         self.update_cue_button.setEnabled(False)
 
-        self.score_button = QPushButton("Партитура", self)
-        self.score_button.setGeometry(490, 260, 120, 30)
-        self.score_button.clicked.connect(self.score_window.show)
+        self.score_button = QPushButton("→", self)
+        self.score_button.setGeometry(self.width() - 50, self.height() - 40, 40, 30)
+        self.score_button.clicked.connect(self.toggle_score_window)
 
         self.advance_cue_number()
 
         self.current_cue_key = None
+        self.score_window.hide()
+
+    def toggle_score_window(self):
+        if self.score_window.isVisible():
+            self.score_window.hide()
+            self.score_button.setText("→")
+        else:
+            geo = self.geometry()
+            score_width = self.score_window.width()
+            score_height = self.score_window.height()
+            x = geo.x() + geo.width() + 10
+            y = geo.y()
+            self.score_window.setGeometry(x, y, score_width, score_height)
+            self.score_window.show()
+            self.score_button.setText("←")
 
     def mark_cue_modified(self):
         self.update_cue_button.setEnabled(True)
