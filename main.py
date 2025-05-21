@@ -18,10 +18,6 @@ class MainWindow(QMainWindow):
 
         self.channels = []
 
-        # Кнопка Clear (канал 1)
-        self.clear_button = QPushButton("X", self)
-        self.clear_button.setGeometry(20, 30, 60, 30)
-        self.clear_button.clicked.connect(self.send_clear)
 
         # Фейдер Opacity (канал 2)
         self.opacity_label = QLabel("Opacity", self)
@@ -145,7 +141,7 @@ class MainWindow(QMainWindow):
                 for i, ch in enumerate(self.channels):
                     val = cue.get(f"channel_{i+1}", 0)
                     if i == 0:
-                        self.clear_button.setDown(val > 127)
+                        pass  # канал 1 (Clear) не отображается в интерфейсе
                     elif i == 1:
                         self.opacity_slider.setValue(val)
                     elif i == 2:
@@ -279,7 +275,7 @@ class ScoreWindow(QDialog):
                     self.main_window.update_dmx(cue.get(f"channel_{i+1}", 0), i)
                 val = cue.get(f"channel_{i+1}", 0)
                 if i == 0:
-                    self.main_window.clear_button.setDown(val > 127)
+                    pass  # канал 1 (Clear) не отображается в интерфейсе
                 elif i == 1:
                     self.main_window.opacity_slider.setValue(val)
                 elif i == 2:
