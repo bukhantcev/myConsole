@@ -71,6 +71,15 @@ class MainWindow(QMainWindow):
         self.score_button.setGeometry(self.width() - 50, self.height() - 40, 40, 30)
         self.score_button.clicked.connect(self.toggle_score_window)
 
+        # Blinde button and state
+        self.blinde_button = QPushButton("Blinde", self)
+        self.blinde_button.setGeometry(self.width() - 100, 10, 80, 30)
+        self.blinde_button.clicked.connect(self.toggle_blinde)
+        self.blinde_state = False
+        self.blinde_timer = QTimer(self)
+        self.blinde_timer.timeout.connect(self.blink_blinde_label)
+        self.blinde_visible = True
+
         self.advance_cue_number()
 
         self.current_cue_key = None
@@ -106,8 +115,56 @@ class MainWindow(QMainWindow):
     def update_dmx(self, value, channel_index):
         if not self.channels:
             return
-        self.channels[channel_index].set_fade([value], 0)
+        # всегда сохраняем в _target
         self.channels[channel_index]._target = [value]
+        if not self.blinde_state:
+            self.channels[channel_index].set_fade([value], 0)
+
+    def toggle_blinde(self):
+        self.blinde_state = not self.blinde_state
+        if self.blinde_state:
+            self.blinde_timer.start(500)
+            self.blinde_button.setStyleSheet("background-color: red;")
+            self.blinde_button.setText("Blinde")
+            self.saved_output = [ch.get_values()[0] for ch in self.channels]
+            self.blinde_active_cue_key = self.current_cue_key
+        else:
+            self.blinde_timer.stop()
+            self.blinde_button.setStyleSheet("")
+            self.blinde_button.setText("Blinde")
+
+            # Восстановить Art-Net и текущую активную Cue
+            try:
+                with open("score.json", "r", encoding="utf-8") as f:
+                    data = list(json.load(f).items())
+                cue_data = dict(data)[self.blinde_active_cue_key]
+                cue = cue_data["levels"]
+                for i, val in enumerate(self.saved_output):
+                    self.channels[i].set_fade([val], 0)
+                    self.channels[i]._target = [val]
+                for i, ch in enumerate(self.channels):
+                    val = cue.get(f"channel_{i+1}", 0)
+                    if i == 0:
+                        self.clear_button.setDown(val > 127)
+                    elif i == 1:
+                        self.opacity_slider.setValue(val)
+                    elif i == 2:
+                        index = self.clip_select.findData(val)
+                        if index >= 0:
+                            self.clip_select.setCurrentIndex(index)
+                    elif i == 3:
+                        self.transition_slider.setValue(val)
+                self.current_cue_key = self.blinde_active_cue_key
+                self.cue_name_input.setText(cue_data["name"])
+            except Exception as e:
+                print(f"Ошибка восстановления Cue: {e}")
+
+    def blink_blinde_label(self):
+        if self.blinde_visible:
+            self.blinde_button.setStyleSheet("background-color: none; color: transparent;")
+        else:
+            self.blinde_button.setStyleSheet("background-color: red; color: white;")
+        self.blinde_visible = not self.blinde_visible
 
     def save_current_cue(self):
         import uuid
@@ -120,7 +177,7 @@ class MainWindow(QMainWindow):
             except FileNotFoundError:
                 index = 1
             name = f"Cue {index}"
-        levels = {f"channel_{i+1}": ch.get_values()[0] for i, ch in enumerate(self.channels)}
+        levels = {f"channel_{i+1}": ch._target[0] if hasattr(ch, "_target") and ch._target else 0 for i, ch in enumerate(self.channels)}
         try:
             with open("score.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -143,7 +200,7 @@ class MainWindow(QMainWindow):
         if not self.current_cue_key:
             return
 
-        levels = {f"channel_{i+1}": ch.get_values()[0] for i, ch in enumerate(self.channels)}
+        levels = {f"channel_{i+1}": ch._target[0] if hasattr(ch, "_target") and ch._target else 0 for i, ch in enumerate(self.channels)}
         try:
             with open("score.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -216,7 +273,8 @@ class ScoreWindow(QDialog):
             self.main_window.cue_name_input.setText(cue_data["name"])
 
             for i, ch in enumerate(self.main_window.channels):
-                self.main_window.update_dmx(cue.get(f"channel_{i+1}", 0), i)
+                if not self.main_window.blinde_state:
+                    self.main_window.update_dmx(cue.get(f"channel_{i+1}", 0), i)
                 val = cue.get(f"channel_{i+1}", 0)
                 if i == 0:
                     self.main_window.clear_button.setDown(val > 127)
