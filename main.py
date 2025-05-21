@@ -108,13 +108,16 @@ class MainWindow(QMainWindow):
         self.channels = [universe.add_channel(start=i + 1, width=1) for i in range(4)]
         self.node.start_refresh()
 
-    def update_dmx(self, value, channel_index):
+    def update_dmx(self, value, channel_index, delay_ms=0):
         if not self.channels:
             return
         # всегда сохраняем в _target
         self.channels[channel_index]._target = [value]
         if not self.blinde_state:
-            self.channels[channel_index].set_fade([value], 0)
+            if delay_ms > 0:
+                QTimer.singleShot(delay_ms, lambda: self.channels[channel_index].set_fade([value], 0))
+            else:
+                self.channels[channel_index].set_fade([value], 0)
 
     def toggle_blinde(self):
         self.blinde_state = not self.blinde_state
@@ -150,6 +153,15 @@ class MainWindow(QMainWindow):
                             self.clip_select.setCurrentIndex(index)
                     elif i == 3:
                         self.transition_slider.setValue(val)
+
+                if not self.blinde_state:
+                    for i, ch in enumerate(self.channels):
+                        val = cue.get(f"channel_{i+1}", 0)
+                        if i == 3:
+                            self.update_dmx(val, i, delay_ms=0)
+                        else:
+                            self.update_dmx(val, i, delay_ms=50)
+
                 self.current_cue_key = self.blinde_active_cue_key
                 self.cue_name_input.setText(cue_data["name"])
                 # выделить текущую Cue в списке
@@ -271,9 +283,12 @@ class ScoreWindow(QDialog):
             self.main_window.cue_name_input.setText(cue_data["name"])
 
             for i, ch in enumerate(self.main_window.channels):
-                if not self.main_window.blinde_state:
-                    self.main_window.update_dmx(cue.get(f"channel_{i+1}", 0), i)
                 val = cue.get(f"channel_{i+1}", 0)
+                if not self.main_window.blinde_state:
+                    if i == 3:  # Transition channel
+                        self.main_window.update_dmx(val, i, delay_ms=0)
+                    else:
+                        self.main_window.update_dmx(val, i, delay_ms=50)
                 if i == 0:
                     pass  # канал 1 (Clear) не отображается в интерфейсе
                 elif i == 1:
