@@ -279,20 +279,23 @@ class ScoreWindow(QDialog):
 
             cue_key, cue_data = data[cue_index]
             cue = cue_data["levels"]
+            # Получаем fade_time для Opacity (канал 2) из Transition (канал 4)
+            fade_time = int((cue.get("channel_4", 0) / 255) * 10000)
             self.main_window.current_cue_key = cue_key
             self.main_window.cue_name_input.setText(cue_data["name"])
 
             for i, ch in enumerate(self.main_window.channels):
                 val = cue.get(f"channel_{i+1}", 0)
                 if not self.main_window.blinde_state:
-                    if i == 3:  # Transition channel
-                        self.main_window.update_dmx(val, i, delay_ms=0)
+                    if i == 1:
+                        self.main_window.channels[i]._target = [val]
+                        self.main_window.channels[i].set_fade([val], fade_time)
                     else:
                         self.main_window.update_dmx(val, i, delay_ms=50)
                 if i == 0:
                     pass  # канал 1 (Clear) не отображается в интерфейсе
                 elif i == 1:
-                    self.main_window.opacity_slider.setValue(val)
+                    QTimer.singleShot(fade_time, lambda v=val: self.main_window.opacity_slider.setValue(v))
                 elif i == 2:
                     index = self.main_window.clip_select.findData(val)
                     if index >= 0:
