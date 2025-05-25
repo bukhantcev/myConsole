@@ -25,6 +25,7 @@ class MainWindow(QMainWindow):
 
         self.channels = []
 
+        self.current_cue_key = None
 
         # Фейдер Opacity (канал 2)
         self.opacity_label = QLabel("Opacity", self)
@@ -174,6 +175,7 @@ class MainWindow(QMainWindow):
                 # выделить текущую Cue в списке
                 self.score_window.select_cue_by_id(self.current_cue_key)
                 self.score_window.list_box.repaint()
+                self.score_window.activate_cue(self.score_window.list_box.currentItem())
                 # self.score_window.reload_list()  # удалено по заданию
             except Exception as e:
                 print(f"Ошибка восстановления Cue: {e}")
@@ -275,34 +277,55 @@ class ScoreWindow(QDialog):
 
     def reload_list(self):
         self.list_box.clear()
+        current_id = self.main_window.current_cue_key
         try:
             with open("score.json", "r", encoding="utf-8") as f:
                 self.data = json.load(f)
 
-            for cue_id, cue_data in self.data.items():
+            for index, (cue_id, cue_data) in enumerate(self.data.items(), 1):
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, cue_id)
-                item.setText(cue_data.get("name", "Cue"))
+                item.setText(f"{index}. {cue_data.get('name', 'Cue')}")
                 self.list_box.addItem(item)
         except FileNotFoundError:
             self.list_box.addItem("Нет сохранённых Cue")
+        # Highlight/select current cue if any
+        if current_id:
+            for i in range(self.list_box.count()):
+                item = self.list_box.item(i)
+                if item.data(Qt.UserRole) == current_id:
+                    self.list_box.setCurrentRow(i)
+                    break
+            self.highlight_current_cue()
 
     def activate_cue(self, item):
+        # В режиме Blinde только применяем уровни, но не меняем визуальное выделение
+        if self.main_window.blinde_state:
+            apply_only = True
+            # Set cue name input to the selected cue's name
+            self.main_window.cue_name_input.setText(self.data[item.data(Qt.UserRole)]["name"])
+        else:
+            apply_only = False
         try:
             # Сброс цвета всех элементов и выделение активного
             from PyQt5.QtGui import QColor
 
-            for i in range(self.list_box.count()):
-                self.list_box.item(i).setBackground(QColor(0, 0, 0))  # черный фон
-                self.list_box.item(i).setForeground(Qt.white)         # белый текст
-            item.setBackground(QColor(80, 80, 80))  # серый для активного
-            item.setForeground(Qt.white)
+            if not apply_only:
+                for i in range(self.list_box.count()):
+                    self.list_box.item(i).setBackground(QColor(0, 0, 0))  # черный фон
+                    self.list_box.item(i).setForeground(Qt.white)         # белый текст
+                item.setBackground(QColor(80, 80, 80))  # серый для активного
+                item.setForeground(Qt.white)
 
             cue_id = item.data(Qt.UserRole)
             cue_data = self.data[cue_id]
+            # Always set current_cue_key to the selected cue id
+            self.main_window.current_cue_key = cue_id
             cue = cue_data["levels"]
             fade_time = int((cue.get("channel_4", 0) / 255) * 10000)
-            self.main_window.current_cue_key = cue_id
+            # Only highlight if not in blinde_state
+            if not self.main_window.blinde_state:
+                self.main_window.score_window.highlight_current_cue()
             self.main_window.cue_name_input.setText(cue_data["name"])
 
             from functools import partial
@@ -337,12 +360,14 @@ class ScoreWindow(QDialog):
                 return True
             elif event.key() == Qt.Key_Right:
                 try:
-                    with open("score.json", "r", encoding="utf-8") as f:
-                        data = list(json.load(f).items())
-                    keys = [k for k, _ in data]
-                    if self.main_window.current_cue_key in keys:
-                        idx = keys.index(self.main_window.current_cue_key)
-                        if idx < len(keys) - 1:
+                    current_id = self.main_window.current_cue_key
+                    list_keys = []
+                    for i in range(self.list_box.count()):
+                        item = self.list_box.item(i)
+                        list_keys.append(item.data(Qt.UserRole))
+                    if current_id in list_keys:
+                        idx = list_keys.index(current_id)
+                        if idx < len(list_keys) - 1:
                             next_item = self.list_box.item(idx + 1)
                             self.list_box.setCurrentRow(idx + 1)
                             self.activate_cue(next_item)
@@ -351,11 +376,13 @@ class ScoreWindow(QDialog):
                 return True
             elif event.key() == Qt.Key_Left:
                 try:
-                    with open("score.json", "r", encoding="utf-8") as f:
-                        data = list(json.load(f).items())
-                    keys = [k for k, _ in data]
-                    if self.main_window.current_cue_key in keys:
-                        idx = keys.index(self.main_window.current_cue_key)
+                    current_id = self.main_window.current_cue_key
+                    list_keys = []
+                    for i in range(self.list_box.count()):
+                        item = self.list_box.item(i)
+                        list_keys.append(item.data(Qt.UserRole))
+                    if current_id in list_keys:
+                        idx = list_keys.index(current_id)
                         if idx > 0:
                             prev_item = self.list_box.item(idx - 1)
                             self.list_box.setCurrentRow(idx - 1)
@@ -395,7 +422,26 @@ class ScoreWindow(QDialog):
 
     def dropEvent(self, event):
         super().dropEvent(event)
-        QTimer.singleShot(0, self.save_new_order)
+
+        # сразу сохраняем новый порядок в JSON, как в update_current_cue
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+
+        # сохраняем порядок cue из list_box
+        new_order = {}
+        for i in range(self.list_box.count()):
+            item = self.list_box.item(i)
+            cue_id = item.data(Qt.UserRole)
+            if cue_id in data:
+                new_order[cue_id] = data[cue_id]
+
+        with open("score.json", "w", encoding="utf-8") as f:
+            json.dump(new_order, f, indent=2, ensure_ascii=False)
+
+        self.reload_list()
 
     def save_new_order(self):
         try:
@@ -410,6 +456,7 @@ class ScoreWindow(QDialog):
             self.data = new_order  # Обновляем текущие данные
             with open("score.json", "w", encoding="utf-8") as f:
                 json.dump(new_order, f, indent=2, ensure_ascii=False)
+            # self.main_window.update_current_cue()  # Удалено по заданию
         except Exception as e:
             print(f"Ошибка сохранения порядка Cue: {e}")
 
@@ -419,9 +466,22 @@ class ScoreWindow(QDialog):
                 item = self.list_box.item(i)
                 if item.data(Qt.UserRole) == cue_id:
                     self.list_box.setCurrentRow(i)
+                    self.highlight_current_cue()
                     break
         except Exception as e:
             print(f"Ошибка выделения Cue: {e}")
+
+    def highlight_current_cue(self):
+        from PyQt5.QtGui import QColor
+        for i in range(self.list_box.count()):
+            item = self.list_box.item(i)
+            cue_id = item.data(Qt.UserRole)
+            if cue_id == self.main_window.current_cue_key:
+                item.setBackground(QColor(80, 80, 80))
+                item.setForeground(Qt.white)
+            else:
+                item.setBackground(QColor(0, 0, 0))
+                item.setForeground(Qt.white)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
