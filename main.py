@@ -7,7 +7,7 @@ from qasync import QEventLoop
 from pyartnet import ArtNetNode
 from PyQt5.QtWidgets import QLineEdit, QLabel
 import json
-from PyQt5.QtWidgets import QDialog, QListWidget
+from PyQt5.QtWidgets import QDialog, QListWidget, QListWidgetItem
 from PyQt5.QtWidgets import QMenu, QAction
 
 # Глобальный перехватчик ошибок
@@ -173,6 +173,8 @@ class MainWindow(QMainWindow):
                 self.cue_name_input.setText(cue_data["name"])
                 # выделить текущую Cue в списке
                 self.score_window.select_cue_by_id(self.current_cue_key)
+                self.score_window.list_box.repaint()
+                # self.score_window.reload_list()  # удалено по заданию
             except Exception as e:
                 print(f"Ошибка восстановления Cue: {e}")
 
@@ -256,16 +258,23 @@ class ScoreWindow(QDialog):
         self.list_box.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_box.customContextMenuRequested.connect(self.show_context_menu)
 
+        # Enable drag and drop reordering
+        self.list_box.setDragDropMode(QListWidget.InternalMove)
+        self.list_box.setDefaultDropAction(Qt.MoveAction)
+
         self.reload_list()
 
     def reload_list(self):
         self.list_box.clear()
         try:
             with open("score.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for idx, (cue_id, cue_data) in enumerate(data.items(), 1):
-                name = cue_data.get("name", f"Cue {idx}")
-                self.list_box.addItem(f"{idx}. {name}")
+                self.data = json.load(f)
+
+            for cue_id, cue_data in self.data.items():
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, cue_id)
+                item.setText(cue_data.get("name", "Cue"))
+                self.list_box.addItem(item)
         except FileNotFoundError:
             self.list_box.addItem("Нет сохранённых Cue")
 
@@ -279,24 +288,12 @@ class ScoreWindow(QDialog):
                 self.list_box.item(i).setForeground(Qt.white)         # белый текст
             item.setBackground(QColor(80, 80, 80))  # серый для активного
             item.setForeground(Qt.white)
-            cue_name = item.text()
-            if ". " in cue_name:
-                cue_name = cue_name.split(". ", 1)[1]
 
-            # Найти cue_id по порядку в списке
-            cue_index = self.list_box.row(item)
-
-            with open("score.json", "r", encoding="utf-8") as f:
-                data = list(json.load(f).items())
-
-            if cue_index >= len(data):
-                return
-
-            cue_key, cue_data = data[cue_index]
+            cue_id = item.data(Qt.UserRole)
+            cue_data = self.data[cue_id]
             cue = cue_data["levels"]
-            # Получаем fade_time для Opacity (канал 2) из Transition (канал 4)
             fade_time = int((cue.get("channel_4", 0) / 255) * 10000)
-            self.main_window.current_cue_key = cue_key
+            self.main_window.current_cue_key = cue_id
             self.main_window.cue_name_input.setText(cue_data["name"])
 
             from functools import partial
@@ -387,13 +384,32 @@ class ScoreWindow(QDialog):
 
             self.reload_list()
 
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        self.save_new_order()
+
+    def save_new_order(self):
+        try:
+            new_order = {}
+            # Очищаем self.data и переупорядочиваем по cue_id
+            for i in range(self.list_box.count()):
+                item = self.list_box.item(i)
+                cue_id = item.data(Qt.UserRole)
+                if cue_id in self.data:
+                    new_order[cue_id] = self.data[cue_id]
+
+            self.data = new_order  # Обновляем текущие данные
+            with open("score.json", "w", encoding="utf-8") as f:
+                json.dump(new_order, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Ошибка сохранения порядка Cue: {e}")
+
     def select_cue_by_id(self, cue_id):
         try:
-            with open("score.json", "r", encoding="utf-8") as f:
-                data = list(json.load(f).items())
-            for idx, (key, _) in enumerate(data):
-                if key == cue_id:
-                    self.list_box.setCurrentRow(idx)
+            for i in range(self.list_box.count()):
+                item = self.list_box.item(i)
+                if item.data(Qt.UserRole) == cue_id:
+                    self.list_box.setCurrentRow(i)
                     break
         except Exception as e:
             print(f"Ошибка выделения Cue: {e}")
