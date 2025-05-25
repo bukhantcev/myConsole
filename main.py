@@ -231,6 +231,15 @@ class MainWindow(QMainWindow):
             data[self.current_cue_key]["name"] = name
             data[self.current_cue_key]["levels"] = levels
 
+        # сохраняем порядок cue из list_box
+        new_order = {}
+        for i in range(self.score_window.list_box.count()):
+            item = self.score_window.list_box.item(i)
+            cue_id = item.data(Qt.UserRole)
+            if cue_id in data:
+                new_order[cue_id] = data[cue_id]
+        data = new_order
+
         with open("score.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -386,7 +395,7 @@ class ScoreWindow(QDialog):
 
     def dropEvent(self, event):
         super().dropEvent(event)
-        self.save_new_order()
+        QTimer.singleShot(0, self.save_new_order)
 
     def save_new_order(self):
         try:
