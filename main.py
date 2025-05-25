@@ -10,6 +10,13 @@ import json
 from PyQt5.QtWidgets import QDialog, QListWidget
 from PyQt5.QtWidgets import QMenu, QAction
 
+# Глобальный перехватчик ошибок
+def exception_hook(exctype, value, traceback):
+    print("Exception:", value)
+    sys.__excepthook__(exctype, value, traceback)
+
+sys.excepthook = exception_hook
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -264,6 +271,14 @@ class ScoreWindow(QDialog):
 
     def activate_cue(self, item):
         try:
+            # Сброс цвета всех элементов и выделение активного
+            from PyQt5.QtGui import QColor
+
+            for i in range(self.list_box.count()):
+                self.list_box.item(i).setBackground(QColor(0, 0, 0))  # черный фон
+                self.list_box.item(i).setForeground(Qt.white)         # белый текст
+            item.setBackground(QColor(80, 80, 80))  # серый для активного
+            item.setForeground(Qt.white)
             cue_name = item.text()
             if ". " in cue_name:
                 cue_name = cue_name.split(". ", 1)[1]
@@ -284,6 +299,7 @@ class ScoreWindow(QDialog):
             self.main_window.current_cue_key = cue_key
             self.main_window.cue_name_input.setText(cue_data["name"])
 
+            from functools import partial
             for i, ch in enumerate(self.main_window.channels):
                 val = cue.get(f"channel_{i+1}", 0)
                 if not self.main_window.blinde_state:
@@ -295,7 +311,7 @@ class ScoreWindow(QDialog):
                 if i == 0:
                     pass  # канал 1 (Clear) не отображается в интерфейсе
                 elif i == 1:
-                    QTimer.singleShot(fade_time, lambda v=val: self.main_window.opacity_slider.setValue(v))
+                    QTimer.singleShot(fade_time, partial(self.main_window.opacity_slider.setValue, val))
                 elif i == 2:
                     index = self.main_window.clip_select.findData(val)
                     if index >= 0:
@@ -314,16 +330,32 @@ class ScoreWindow(QDialog):
                     self.activate_cue(current_item)
                 return True
             elif event.key() == Qt.Key_Right:
-                current_row = self.list_box.currentRow()
-                if current_row < self.list_box.count() - 1:
-                    self.list_box.setCurrentRow(current_row + 1)
-                    self.activate_cue(self.list_box.currentItem())
+                try:
+                    with open("score.json", "r", encoding="utf-8") as f:
+                        data = list(json.load(f).items())
+                    keys = [k for k, _ in data]
+                    if self.main_window.current_cue_key in keys:
+                        idx = keys.index(self.main_window.current_cue_key)
+                        if idx < len(keys) - 1:
+                            next_item = self.list_box.item(idx + 1)
+                            self.list_box.setCurrentRow(idx + 1)
+                            self.activate_cue(next_item)
+                except Exception as e:
+                    print(f"Ошибка перехода вправо: {e}")
                 return True
             elif event.key() == Qt.Key_Left:
-                current_row = self.list_box.currentRow()
-                if current_row > 0:
-                    self.list_box.setCurrentRow(current_row - 1)
-                    self.activate_cue(self.list_box.currentItem())
+                try:
+                    with open("score.json", "r", encoding="utf-8") as f:
+                        data = list(json.load(f).items())
+                    keys = [k for k, _ in data]
+                    if self.main_window.current_cue_key in keys:
+                        idx = keys.index(self.main_window.current_cue_key)
+                        if idx > 0:
+                            prev_item = self.list_box.item(idx - 1)
+                            self.list_box.setCurrentRow(idx - 1)
+                            self.activate_cue(prev_item)
+                except Exception as e:
+                    print(f"Ошибка перехода влево: {e}")
                 return True
         return super().eventFilter(source, event)
 
