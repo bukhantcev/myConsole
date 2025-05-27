@@ -104,6 +104,19 @@ class MainWindow(QMainWindow):
         dlg.setWindowTitle("Настройки ArtNet")
         dlg.setFixedSize(300, 220)
 
+        # Загружаем текущие значения из score.json, если есть
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                saved_data = json.load(f)
+                if "settings" in saved_data:
+                    settings = saved_data["settings"]
+                    self.artnet_mode = settings.get("mode", self.artnet_mode)
+                    self.artnet_ip = settings.get("ip", self.artnet_ip)
+                    self.artnet_universe = settings.get("universe", self.artnet_universe)
+                    self.artnet_start_addr = settings.get("start_addr", self.artnet_start_addr)
+        except Exception as e:
+            print(f"Ошибка загрузки настроек: {e}")
+
         mode_label = QLabel("Режим:", dlg)
         mode_label.move(20, 20)
         mode_combo = QComboBox(dlg)
@@ -132,81 +145,42 @@ class MainWindow(QMainWindow):
         start_input.setText(str(getattr(self, "artnet_start_addr", 1)))
         start_input.move(120, 140)
 
+        # Слот для показа/скрытия ip_input
+        def toggle_ip_input_visibility():
+            is_unicast = mode_combo.currentText() == "Unicast"
+            ip_label.setVisible(is_unicast)
+            ip_input.setVisible(is_unicast)
+        mode_combo.currentIndexChanged.connect(toggle_ip_input_visibility)
+        toggle_ip_input_visibility()
+
         ok_btn = QPushButton("OK", dlg)
         ok_btn.move(100, 180)
-        ok_btn.clicked.connect(lambda: (
-            setattr(self, "artnet_mode", mode_combo.currentText()),
-            setattr(self, "artnet_ip", ip_input.text()),
-            setattr(self, "artnet_universe", int(universe_input.text())),
-            setattr(self, "artnet_start_addr", int(start_input.text())),
-            dlg.accept(),
+        def on_accept():
+            setattr(self, "artnet_mode", mode_combo.currentText())
+            setattr(self, "artnet_ip", ip_input.text())
+            setattr(self, "artnet_universe", int(universe_input.text()))
+            setattr(self, "artnet_start_addr", int(start_input.text()))
+            # Сохраняем настройки в score.json
+            try:
+                with open("score.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except FileNotFoundError:
+                data = {}
+
+            data["settings"] = {
+                "mode": self.artnet_mode,
+                "ip": self.artnet_ip,
+                "universe": self.artnet_universe,
+                "start_addr": self.artnet_start_addr
+            }
+
+            with open("score.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            dlg.accept()
             asyncio.ensure_future(self.setup_artnet())
-        ))
+        ok_btn.clicked.connect(on_accept)
 
         dlg.exec_()
-
-        # Фейдер Opacity (канал 2)
-        self.opacity_label = QLabel("Opacity", self)
-        self.opacity_label.setGeometry(100, 10, 60, 20)
-        self.opacity_slider = QSlider(self)
-        self.opacity_slider.setStyleSheet("QSlider::handle:vertical { background: gray; height: 20px; width: 10px; }")
-        self.opacity_slider.setOrientation(Qt.Vertical)
-        self.opacity_slider.setGeometry(100, 30, 60, 180)
-        self.opacity_slider.setRange(0, 255)
-        self.opacity_slider.setValue(255)
-        self.opacity_slider.valueChanged.connect(lambda val: (self.update_dmx(val, 1), self.mark_cue_modified()))
-
-        # Выпадающий список ClipSelect (канал 3)
-        self.clip_select = QComboBox(self)
-        self.clip_select.setGeometry(180, 30, 110, 30)
-        for i in range(1, 256):
-            self.clip_select.addItem(f"Column {i}", i)
-        self.clip_select.currentIndexChanged.connect(lambda index: (self.update_dmx(self.clip_select.itemData(index), 2), self.mark_cue_modified()))
-
-        # Фейдер Transition (канал 4)
-        self.transition_label = QLabel("Transition", self)
-        self.transition_label.setGeometry(300, 10, 60, 20)
-        self.transition_slider = QSlider(self)
-        self.transition_slider.setStyleSheet("QSlider::handle:vertical { background: gray; height: 20px; width: 10px; }")
-        self.transition_slider.setOrientation(Qt.Vertical)
-        self.transition_slider.setGeometry(300, 30, 60, 180)
-        self.transition_slider.setRange(0, 255)
-        self.transition_slider.setValue(0)
-        self.transition_slider.valueChanged.connect(lambda val: (self.update_dmx(val, 3), self.mark_cue_modified()))
-
-        self.score_window = ScoreWindow(self)
-        self.cue_name_input = QLineEdit(self)
-        self.cue_name_input.setPlaceholderText("Cue Name")
-        self.cue_name_input.setGeometry(20, 260, 200, 30)
-        self.cue_name_input.textChanged.connect(self.mark_cue_modified)
-
-        self.save_cue_button = QPushButton("Сохранить Cue", self)
-        self.save_cue_button.setGeometry(230, 260, 120, 30)
-        self.save_cue_button.clicked.connect(self.save_current_cue)
-
-        self.update_cue_button = QPushButton("Обновить Cue", self)
-        self.update_cue_button.setGeometry(360, 260, 120, 30)
-        self.update_cue_button.clicked.connect(self.update_current_cue)
-        self.update_cue_button.setEnabled(False)
-
-        self.score_button = QPushButton("→", self)
-        self.score_button.setGeometry(self.width() - 50, self.height() - 40, 40, 30)
-        self.score_button.clicked.connect(self.toggle_score_window)
-
-        # Blinde button and state
-        self.blinde_button = QPushButton("Blinde", self)
-        self.blinde_button.setGeometry(self.width() - 100, 10, 80, 30)
-        self.blinde_button.clicked.connect(self.toggle_blinde)
-        self.blinde_state = False
-        self.blinde_timer = QTimer(self)
-        self.blinde_timer.timeout.connect(self.blink_blinde_label)
-        self.blinde_visible = True
-        self._opacity_fade_timer = QTimer(self)
-
-        self.advance_cue_number()
-
-        self.current_cue_key = None
-        self.score_window.hide()
 
     def toggle_score_window(self):
         if self.score_window.isVisible():
@@ -258,14 +232,31 @@ class MainWindow(QMainWindow):
                     import socket
                     self.node._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     if self.artnet_mode == "Broadcast":
-                        self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                        try:
+                            self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                        except Exception as e:
+                            print(f"Ошибка установки SO_BROADCAST: {e}")
 
             self.node = None
         target_ip = self.artnet_ip if self.artnet_mode == "Unicast" else "255.255.255.255"
-        self.node = ArtNetNode(target_ip, port=6454)
-        # Установка SO_BROADCAST для режима Broadcast
+        # --- PATCH: try ArtNetNode with port 6454, fallback to 6455 if PermissionError
+        try:
+            self.node = ArtNetNode(target_ip, port=6454)
+        except PermissionError as e:
+            print(f"PermissionError: {e}. Попробуем порт 6455.")
+            self.node = ArtNetNode(target_ip, port=6455)
+        # --- PATCH: bind socket after creation
+        self.node._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self.node._socket.bind(('', 0))  # используем любой доступный порт
+        except PermissionError as e:
+            print(f"Ошибка привязки сокета: {e}")
+        # --- PATCH: set SO_BROADCAST with try/except
         if self.artnet_mode == "Broadcast":
-            self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            except Exception as e:
+                print(f"Ошибка установки SO_BROADCAST: {e}")
         universe = self.node.add_universe(self.artnet_universe)
         self.channels = [universe.add_channel(start=self.artnet_start_addr + i, width=1) for i in range(4)]
         self.node.start_refresh()
@@ -460,8 +451,11 @@ class ScoreWindow(QDialog):
         # В режиме Blinde только применяем уровни, но не меняем визуальное выделение
         if self.main_window.blinde_state:
             apply_only = True
-            # Set cue name input to the selected cue's name
-            self.main_window.cue_name_input.setText(self.data[item.data(Qt.UserRole)]["name"])
+            # Set cue name input to the selected cue's name (robust version)
+            cue_id = item.data(Qt.UserRole)
+            cue_data = self.data.get(cue_id, {})
+            cue_name = cue_data.get("name", "Cue")
+            self.main_window.cue_name_input.setText(cue_name)
         else:
             apply_only = False
         try:
@@ -476,15 +470,16 @@ class ScoreWindow(QDialog):
                 item.setForeground(Qt.white)
 
             cue_id = item.data(Qt.UserRole)
-            cue_data = self.data[cue_id]
+            cue_data = self.data.get(cue_id, {})
             # Always set current_cue_key to the selected cue id
             self.main_window.current_cue_key = cue_id
-            cue = cue_data["levels"]
+            cue = cue_data.get("levels", {})
             fade_time = int((cue.get("channel_4", 0) / 255) * 10000)
             # Only highlight if not in blinde_state
             if not self.main_window.blinde_state:
                 self.main_window.score_window.highlight_current_cue()
-            self.main_window.cue_name_input.setText(cue_data["name"])
+            cue_name = cue_data.get("name", "Cue")
+            self.main_window.cue_name_input.setText(cue_name)
 
             from functools import partial
             for i, ch in enumerate(self.main_window.channels):
@@ -650,6 +645,7 @@ class ScoreWindow(QDialog):
                 item.setBackground(QColor(0, 0, 0))
                 item.setForeground(Qt.white)
 
+# TODO: сделать меню с сохранением шоу файла и загрузкой
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
