@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self.blinde_timer = QTimer(self)
         self.blinde_timer.timeout.connect(self.blink_blinde_label)
         self.blinde_visible = True
+        self._opacity_fade_timer = QTimer(self)
 
         self.advance_cue_number()
 
@@ -286,6 +287,10 @@ class ScoreWindow(QDialog):
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, cue_id)
                 item.setText(f"{index}. {cue_data.get('name', 'Cue')}")
+                # Устанавливаем размер шрифта 14
+                font = item.font()
+                font.setPointSize(14)
+                item.setFont(font)
                 self.list_box.addItem(item)
         except FileNotFoundError:
             self.list_box.addItem("Нет сохранённых Cue")
@@ -340,7 +345,13 @@ class ScoreWindow(QDialog):
                 if i == 0:
                     pass  # канал 1 (Clear) не отображается в интерфейсе
                 elif i == 1:
-                    QTimer.singleShot(fade_time, partial(self.main_window.opacity_slider.setValue, val))
+                    # Cancel previous fade timer and set new one for opacity slider
+                    if hasattr(self.main_window, '_opacity_fade_timer') and self.main_window._opacity_fade_timer.isActive():
+                        self.main_window._opacity_fade_timer.stop()
+                    self.main_window._opacity_fade_timer = QTimer(self)
+                    self.main_window._opacity_fade_timer.setSingleShot(True)
+                    self.main_window._opacity_fade_timer.timeout.connect(partial(self.main_window.opacity_slider.setValue, val))
+                    self.main_window._opacity_fade_timer.start(fade_time)
                 elif i == 2:
                     index = self.main_window.clip_select.findData(val)
                     if index >= 0:
@@ -442,6 +453,9 @@ class ScoreWindow(QDialog):
             json.dump(new_order, f, indent=2, ensure_ascii=False)
 
         self.reload_list()
+        current_item = self.list_box.currentItem()
+        if current_item:
+            self.activate_cue(current_item)
 
     def save_new_order(self):
         try:
