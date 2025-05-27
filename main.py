@@ -23,9 +23,127 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Мой пульт ArtNet")
         self.setGeometry(100, 100, 640, 300)
 
+        # ArtNet settings defaults
+        self.artnet_mode = "Broadcast"
+        self.artnet_ip = "127.0.0.1"
+        self.artnet_universe = 0
+        self.artnet_start_addr = 1
+
         self.channels = []
 
         self.current_cue_key = None
+        # Settings button (gear)
+        self.settings_button = QPushButton("⚙", self)
+        self.settings_button.setGeometry(10, 10, 30, 30)
+        self.settings_button.clicked.connect(self.show_settings_dialog)
+
+        # Фейдер Opacity (канал 2)
+        self.opacity_label = QLabel("Opacity", self)
+        self.opacity_label.setGeometry(100, 10, 60, 20)
+        self.opacity_slider = QSlider(self)
+        self.opacity_slider.setStyleSheet("QSlider::handle:vertical { background: gray; height: 20px; width: 10px; }")
+        self.opacity_slider.setOrientation(Qt.Vertical)
+        self.opacity_slider.setGeometry(100, 30, 60, 180)
+        self.opacity_slider.setRange(0, 255)
+        self.opacity_slider.setValue(255)
+        self.opacity_slider.valueChanged.connect(lambda val: (self.update_dmx(val, 1), self.mark_cue_modified()))
+
+        # Выпадающий список ClipSelect (канал 3)
+        self.clip_select = QComboBox(self)
+        self.clip_select.setGeometry(180, 30, 110, 30)
+        for i in range(1, 256):
+            self.clip_select.addItem(f"Column {i}", i)
+        self.clip_select.currentIndexChanged.connect(lambda index: (self.update_dmx(self.clip_select.itemData(index), 2), self.mark_cue_modified()))
+
+        # Фейдер Transition (канал 4)
+        self.transition_label = QLabel("Transition", self)
+        self.transition_label.setGeometry(300, 10, 60, 20)
+        self.transition_slider = QSlider(self)
+        self.transition_slider.setStyleSheet("QSlider::handle:vertical { background: gray; height: 20px; width: 10px; }")
+        self.transition_slider.setOrientation(Qt.Vertical)
+        self.transition_slider.setGeometry(300, 30, 60, 180)
+        self.transition_slider.setRange(0, 255)
+        self.transition_slider.setValue(0)
+        self.transition_slider.valueChanged.connect(lambda val: (self.update_dmx(val, 3), self.mark_cue_modified()))
+
+        self.score_window = ScoreWindow(self)
+        self.cue_name_input = QLineEdit(self)
+        self.cue_name_input.setPlaceholderText("Cue Name")
+        self.cue_name_input.setGeometry(20, 260, 200, 30)
+        self.cue_name_input.textChanged.connect(self.mark_cue_modified)
+
+        self.save_cue_button = QPushButton("Сохранить Cue", self)
+        self.save_cue_button.setGeometry(230, 260, 120, 30)
+        self.save_cue_button.clicked.connect(self.save_current_cue)
+
+        self.update_cue_button = QPushButton("Обновить Cue", self)
+        self.update_cue_button.setGeometry(360, 260, 120, 30)
+        self.update_cue_button.clicked.connect(self.update_current_cue)
+        self.update_cue_button.setEnabled(False)
+
+        self.score_button = QPushButton("→", self)
+        self.score_button.setGeometry(self.width() - 50, self.height() - 40, 40, 30)
+        self.score_button.clicked.connect(self.toggle_score_window)
+
+        # Blinde button and state
+        self.blinde_button = QPushButton("Blinde", self)
+        self.blinde_button.setGeometry(self.width() - 100, 10, 80, 30)
+        self.blinde_button.clicked.connect(self.toggle_blinde)
+        self.blinde_state = False
+        self.blinde_timer = QTimer(self)
+        self.blinde_timer.timeout.connect(self.blink_blinde_label)
+        self.blinde_visible = True
+        self._opacity_fade_timer = QTimer(self)
+
+        self.advance_cue_number()
+
+        self.current_cue_key = None
+        self.score_window.hide()
+    def show_settings_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Настройки ArtNet")
+        dlg.setFixedSize(300, 220)
+
+        mode_label = QLabel("Режим:", dlg)
+        mode_label.move(20, 20)
+        mode_combo = QComboBox(dlg)
+        mode_combo.addItems(["Broadcast", "Unicast"])
+        mode_combo.move(120, 20)
+        # Set current mode
+        idx = mode_combo.findText(getattr(self, "artnet_mode", "Broadcast"))
+        if idx >= 0:
+            mode_combo.setCurrentIndex(idx)
+
+        ip_label = QLabel("Unicast IP:", dlg)
+        ip_label.move(20, 60)
+        ip_input = QLineEdit(dlg)
+        ip_input.setText(getattr(self, "artnet_ip", "127.0.0.1"))
+        ip_input.move(120, 60)
+
+        universe_label = QLabel("Universe:", dlg)
+        universe_label.move(20, 100)
+        universe_input = QLineEdit(dlg)
+        universe_input.setText(str(getattr(self, "artnet_universe", 0)))
+        universe_input.move(120, 100)
+
+        start_label = QLabel("Start Addr:", dlg)
+        start_label.move(20, 140)
+        start_input = QLineEdit(dlg)
+        start_input.setText(str(getattr(self, "artnet_start_addr", 1)))
+        start_input.move(120, 140)
+
+        ok_btn = QPushButton("OK", dlg)
+        ok_btn.move(100, 180)
+        ok_btn.clicked.connect(lambda: (
+            setattr(self, "artnet_mode", mode_combo.currentText()),
+            setattr(self, "artnet_ip", ip_input.text()),
+            setattr(self, "artnet_universe", int(universe_input.text())),
+            setattr(self, "artnet_start_addr", int(start_input.text())),
+            dlg.accept(),
+            asyncio.ensure_future(self.setup_artnet())
+        ))
+
+        dlg.exec_()
 
         # Фейдер Opacity (канал 2)
         self.opacity_label = QLabel("Opacity", self)
@@ -112,9 +230,44 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, lambda: self.update_dmx(0, 0))
 
     async def setup_artnet(self):
-        self.node = ArtNetNode('127.0.0.1', port=6454)
-        universe = self.node.add_universe(0)
-        self.channels = [universe.add_channel(start=i + 1, width=1) for i in range(4)]
+        import socket
+        # Остановить предыдущий ArtNet-узел перед созданием нового
+        if hasattr(self, 'node') and self.node:
+            if hasattr(self.node, '_refresh_task') and self.node._refresh_task:
+                self.node._refresh_task.cancel()
+                try:
+                    task = getattr(self.node._refresh_task, "task", self.node._refresh_task)
+                    if asyncio.isfuture(task) or asyncio.iscoroutine(task):
+                        await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"Ошибка завершения refresh_task: {e}")
+
+            if hasattr(self.node, '_socket'):
+                if hasattr(self, 'channels') and self.channels:
+                    for ch in self.channels:
+                        ch.set_fade([0], 0)
+                try:
+                    self.node._socket.close()
+                    self.node._socket = None
+                except Exception as e:
+                    print(f"Ошибка при закрытии сокета: {e}")
+                # <--- ADDITION: recreate socket if needed
+                if self.node._socket is None:
+                    import socket
+                    self.node._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    if self.artnet_mode == "Broadcast":
+                        self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+            self.node = None
+        target_ip = self.artnet_ip if self.artnet_mode == "Unicast" else "255.255.255.255"
+        self.node = ArtNetNode(target_ip, port=6454)
+        # Установка SO_BROADCAST для режима Broadcast
+        if self.artnet_mode == "Broadcast":
+            self.node._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        universe = self.node.add_universe(self.artnet_universe)
+        self.channels = [universe.add_channel(start=self.artnet_start_addr + i, width=1) for i in range(4)]
         self.node.start_refresh()
 
     def update_dmx(self, value, channel_index, delay_ms=0):
