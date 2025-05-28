@@ -669,6 +669,8 @@ class ScoreWindow(QDialog):
         self.list_box.setGeometry(10, 10, 380, 480)
         self.list_box.itemDoubleClicked.connect(self.activate_cue)
         self.list_box.installEventFilter(self)
+        # Ensure multi-selection is enabled
+        self.list_box.setSelectionMode(QListWidget.ExtendedSelection)
 
         self.list_box.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_box.customContextMenuRequested.connect(self.show_context_menu)
@@ -812,14 +814,40 @@ class ScoreWindow(QDialog):
         return super().eventFilter(source, event)
 
     def show_context_menu(self, position):
-        item = self.list_box.itemAt(position)
-        if item is None:
+        selected_items = self.list_box.selectedItems()
+        if not selected_items:
             return
         menu = QMenu()
         delete_action = QAction("Удалить", self)
-        delete_action.triggered.connect(lambda: self.delete_cue(item))
+        # Connect to the new method that deletes all selected cues
+        delete_action.triggered.connect(self.delete_selected_cues)
         menu.addAction(delete_action)
         menu.exec_(self.list_box.viewport().mapToGlobal(position))
+
+    def delete_selected_cues(self):
+        selected_items = self.list_box.selectedItems()
+        if not selected_items:
+            return
+
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+
+        data = dict(data)
+        cues = data.get("cues", {})
+        for item in selected_items:
+            cue_id = item.data(Qt.UserRole)
+            if cue_id in cues:
+                del cues[cue_id]
+
+        data["cues"] = cues
+
+        with open("score.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        self.reload_list()
 
     def delete_cue(self, item):
         cue_index = self.list_box.row(item)
