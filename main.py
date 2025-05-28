@@ -8,7 +8,23 @@ from pyartnet import ArtNetNode
 from PyQt5.QtWidgets import QLineEdit, QLabel
 import json
 from PyQt5.QtWidgets import QDialog, QListWidget, QListWidgetItem
-from PyQt5.QtWidgets import QMenu, QAction
+from PyQt5.QtWidgets import QMenu, QAction, QMenuBar, QFileDialog, QMessageBox, QInputDialog
+import os
+
+# --- Проверка и инициализация score.json ---
+if not os.path.exists("score.json"):
+    default_data = {
+        "score": {
+            "filename": "score",
+            "mode": "Broadcast",
+            "ip": "127.0.0.1",
+            "universe": 0,
+            "start_addr": 1
+        },
+        "cues": {}
+    }
+    with open("score.json", "w", encoding="utf-8") as f:
+        json.dump(default_data, f, indent=2, ensure_ascii=False)
 
 # Глобальный перехватчик ошибок
 def exception_hook(exctype, value, traceback):
@@ -20,6 +36,22 @@ sys.excepthook = exception_hook
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # --- Меню Файл ---
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("Файл")
+        new_action = QAction("Новое шоу", self)
+        new_action.triggered.connect(self.create_new_show)
+        file_menu.addAction(new_action)
+        load_action = QAction("Загрузить шоу", self)
+        load_action.triggered.connect(self.load_show)
+        file_menu.addAction(load_action)
+        save_action = QAction("Сохранить", self)
+        save_action.triggered.connect(self.save_show)
+        file_menu.addAction(save_action)
+        save_as_action = QAction("Сохранить как...", self)
+        save_as_action.triggered.connect(self.save_show_as)
+        file_menu.addAction(save_as_action)
+
         self.setWindowTitle("Мой пульт ArtNet")
         self.setGeometry(100, 100, 640, 300)
 
@@ -32,6 +64,8 @@ class MainWindow(QMainWindow):
         self.channels = []
 
         self.current_cue_key = None
+        self.loaded_show_path = "score.json"
+        self.loaded_show_name = None
         # Settings button (gear)
         self.settings_button = QPushButton("⚙", self)
         self.settings_button.setGeometry(10, 10, 30, 30)
@@ -51,8 +85,10 @@ class MainWindow(QMainWindow):
         # Выпадающий список ClipSelect (канал 3)
         self.clip_select = QComboBox(self)
         self.clip_select.setGeometry(180, 30, 110, 30)
+        self.clip_select.addItem("Выбери колонку", 0)
         for i in range(1, 256):
             self.clip_select.addItem(f"Column {i}", i)
+        self.clip_select.setCurrentIndex(0)
         self.clip_select.currentIndexChanged.connect(lambda index: (self.update_dmx(self.clip_select.itemData(index), 2), self.mark_cue_modified()))
 
         # Фейдер Transition (канал 4)
@@ -99,6 +135,88 @@ class MainWindow(QMainWindow):
 
         self.current_cue_key = None
         self.score_window.hide()
+        self.score_window.finished.connect(self.close)
+        self.check_initial_show_name()
+    def create_new_show(self):
+        text, ok = QInputDialog.getText(self, "Создать новое шоу", "Введите имя шоу:")
+        if ok and text:
+            self.loaded_show_name = text
+            self.loaded_show_path = f"{text}.json"
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["score"] = {"filename": text}
+            # Добавляем или обновляем settings
+            if "settings" in data:
+                settings = data["settings"]
+            else:
+                settings = {
+                    "mode": self.artnet_mode,
+                    "ip": self.artnet_ip,
+                    "universe": self.artnet_universe,
+                    "start_addr": self.artnet_start_addr
+                }
+            data["settings"] = settings
+            # Очищаем cues перед копированием
+            data["cues"] = {}
+            # Сохраняем сразу в score.json и в новый файл шоу
+            with open("score.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            with open(self.loaded_show_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            self.update_window_titles()
+            # Не создаём Cue, сбрасываем текущую Cue и обновляем список
+            self.current_cue_key = None
+            self.score_window.reload_list()
+
+    def load_show(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Загрузить шоу", "", "JSON файлы (*.json)")
+        if path:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            with open("score.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            self.loaded_show_path = path
+            self.loaded_show_name = os.path.splitext(os.path.basename(path))[0]
+            self.update_window_titles()
+            self.score_window.reload_list()
+
+    def save_show(self):
+        if self.loaded_show_name:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            with open(f"{self.loaded_show_name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def save_show_as(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить как...", "", "JSON файлы (*.json)")
+        if path:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            self.loaded_show_path = path
+            self.loaded_show_name = os.path.splitext(os.path.basename(path))[0]
+            self.update_window_titles()
+
+    def check_initial_show_name(self):
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            score = data.get("score", {})
+            filename = score.get("filename", "")
+            if filename == "score":
+                self.create_new_show()
+            else:
+                self.loaded_show_name = filename
+                self.loaded_show_path = f"{filename}.json"
+                self.update_window_titles()
+        except Exception as e:
+            print(f"Ошибка инициализации шоу: {e}")
+
+    def update_window_titles(self):
+        name = self.loaded_show_name or "Без имени"
+        self.setWindowTitle(f"Мой пульт ArtNet - {name}")
+        self.score_window.setWindowTitle(f"Партитура - {name}")
     def show_settings_dialog(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Настройки ArtNet")
@@ -288,8 +406,10 @@ class MainWindow(QMainWindow):
             # Восстановить Art-Net и текущую активную Cue
             try:
                 with open("score.json", "r", encoding="utf-8") as f:
-                    data = list(json.load(f).items())
-                cue_data = dict(data)[self.blinde_active_cue_key]
+                    data = json.load(f)
+                cue_data = data.get("cues", {}).get(self.blinde_active_cue_key)
+                if cue_data is None:
+                    raise KeyError(self.blinde_active_cue_key)
                 cue = cue_data["levels"]
                 for i, val in enumerate(self.saved_output):
                     self.channels[i].set_fade([val], 0)
@@ -339,7 +459,7 @@ class MainWindow(QMainWindow):
             try:
                 with open("score.json", "r", encoding="utf-8") as f:
                     data = json.load(f)
-                index = len(data) + 1
+                index = len(data.get("cues", {})) + 1
             except FileNotFoundError:
                 index = 1
             name = f"Cue {index}"
@@ -349,9 +469,12 @@ class MainWindow(QMainWindow):
                 data = json.load(f)
         except FileNotFoundError:
             data = {}
+            data["cues"] = {}
 
         cue_id = str(uuid.uuid4())
-        data[cue_id] = {"name": name, "levels": levels}
+        if "cues" not in data:
+            data["cues"] = {}
+        data["cues"][cue_id] = {"name": name, "levels": levels}
         self.current_cue_key = cue_id
 
         with open("score.json", "w", encoding="utf-8") as f:
@@ -370,22 +493,23 @@ class MainWindow(QMainWindow):
         try:
             with open("score.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
+                cues = data.get("cues", {})
         except FileNotFoundError:
             return
 
         # Обновляем по ID, независимо от имени
-        if self.current_cue_key in data:
-            data[self.current_cue_key]["name"] = name
-            data[self.current_cue_key]["levels"] = levels
+        if self.current_cue_key in cues:
+            cues[self.current_cue_key]["name"] = name
+            cues[self.current_cue_key]["levels"] = levels
 
         # сохраняем порядок cue из list_box
         new_order = {}
         for i in range(self.score_window.list_box.count()):
             item = self.score_window.list_box.item(i)
             cue_id = item.data(Qt.UserRole)
-            if cue_id in data:
-                new_order[cue_id] = data[cue_id]
-        data = new_order
+            if cue_id in cues:
+                new_order[cue_id] = cues[cue_id]
+        data["cues"] = new_order
 
         with open("score.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -395,6 +519,35 @@ class MainWindow(QMainWindow):
 
     def advance_cue_number(self):
         pass
+
+    def closeEvent(self, event):
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Выход",
+            "Сохранить перед выходом?",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+        )
+
+        if reply == QMessageBox.Save:
+            self.save_current_show()
+            event.accept()
+            QApplication.quit()
+        elif reply == QMessageBox.Discard:
+            event.accept()
+            QApplication.quit()
+        else:
+            event.ignore()
+
+    def save_current_show(self):
+        try:
+            with open("score.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+            show_name = data.get("score", {}).get("filename", "score")
+            with open(f"{show_name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Ошибка при сохранении шоу: {e}")
 
 class ScoreWindow(QDialog):
     def __init__(self, main_window):
@@ -427,7 +580,8 @@ class ScoreWindow(QDialog):
             with open("score.json", "r", encoding="utf-8") as f:
                 self.data = json.load(f)
 
-            for index, (cue_id, cue_data) in enumerate(self.data.items(), 1):
+            cues = self.data.get("cues", {})
+            for index, (cue_id, cue_data) in enumerate(cues.items(), 1):
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, cue_id)
                 item.setText(f"{index}. {cue_data.get('name', 'Cue')}")
@@ -453,7 +607,7 @@ class ScoreWindow(QDialog):
             apply_only = True
             # Set cue name input to the selected cue's name (robust version)
             cue_id = item.data(Qt.UserRole)
-            cue_data = self.data.get(cue_id, {})
+            cue_data = self.data.get("cues", {}).get(cue_id, {})
             cue_name = cue_data.get("name", "Cue")
             self.main_window.cue_name_input.setText(cue_name)
         else:
@@ -470,7 +624,7 @@ class ScoreWindow(QDialog):
                 item.setForeground(Qt.white)
 
             cue_id = item.data(Qt.UserRole)
-            cue_data = self.data.get(cue_id, {})
+            cue_data = self.data.get("cues", {}).get(cue_id, {})
             # Always set current_cue_key to the selected cue id
             self.main_window.current_cue_key = cue_id
             cue = cue_data.get("levels", {})
@@ -565,19 +719,20 @@ class ScoreWindow(QDialog):
         cue_index = self.list_box.row(item)
         try:
             with open("score.json", "r", encoding="utf-8") as f:
-                data = list(json.load(f).items())
+                data = json.load(f)
+            cues = data.get("cues", {})
+            cue_ids = list(cues.keys())
+            if cue_index < len(cue_ids):
+                cue_id = cue_ids[cue_index]
+                cues.pop(cue_id, None)
+                data["cues"] = cues
+
+                with open("score.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
+                self.reload_list()
         except FileNotFoundError:
             return
-
-        if cue_index < len(data):
-            cue_id, _ = data[cue_index]
-            data.pop(cue_index)
-            data = dict(data)
-
-            with open("score.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-            self.reload_list()
 
     def dropEvent(self, event):
         super().dropEvent(event)
@@ -591,14 +746,16 @@ class ScoreWindow(QDialog):
 
         # сохраняем порядок cue из list_box
         new_order = {}
+        cues = data.get("cues", {})
         for i in range(self.list_box.count()):
             item = self.list_box.item(i)
             cue_id = item.data(Qt.UserRole)
-            if cue_id in data:
-                new_order[cue_id] = data[cue_id]
+            if cue_id in cues:
+                new_order[cue_id] = cues[cue_id]
+        data["cues"] = new_order
 
         with open("score.json", "w", encoding="utf-8") as f:
-            json.dump(new_order, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
         self.reload_list()
         current_item = self.list_box.currentItem()
@@ -608,16 +765,17 @@ class ScoreWindow(QDialog):
     def save_new_order(self):
         try:
             new_order = {}
-            # Очищаем self.data и переупорядочиваем по cue_id
+            cues = self.data.get("cues", {})
+            # Очищаем self.data["cues"] и переупорядочиваем по cue_id
             for i in range(self.list_box.count()):
                 item = self.list_box.item(i)
                 cue_id = item.data(Qt.UserRole)
-                if cue_id in self.data:
-                    new_order[cue_id] = self.data[cue_id]
+                if cue_id in cues:
+                    new_order[cue_id] = cues[cue_id]
 
-            self.data = new_order  # Обновляем текущие данные
+            self.data["cues"] = new_order  # Обновляем текущие данные
             with open("score.json", "w", encoding="utf-8") as f:
-                json.dump(new_order, f, indent=2, ensure_ascii=False)
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
             # self.main_window.update_current_cue()  # Удалено по заданию
         except Exception as e:
             print(f"Ошибка сохранения порядка Cue: {e}")
@@ -634,11 +792,17 @@ class ScoreWindow(QDialog):
             print(f"Ошибка выделения Cue: {e}")
 
     def highlight_current_cue(self):
+        pass
+
+    def closeEvent(self, event):
+        # просто закрываем окно без подтверждения
+        event.accept()
         from PyQt5.QtGui import QColor
+        cues = self.data.get("cues", {})
         for i in range(self.list_box.count()):
             item = self.list_box.item(i)
             cue_id = item.data(Qt.UserRole)
-            if cue_id == self.main_window.current_cue_key:
+            if cue_id in cues and cue_id == self.main_window.current_cue_key:
                 item.setBackground(QColor(80, 80, 80))
                 item.setForeground(Qt.white)
             else:
