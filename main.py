@@ -1,3 +1,50 @@
+def initialize_score_file():
+    default_settings = {
+        "filename": "score",
+        "settings": {
+            "mode": "Broadcast",
+            "ip": "127.0.0.1",
+            "universe": 0,
+            "start_addr": 1
+        },
+        "cues": {}
+    }
+
+    if not os.path.exists("score.json"):
+        with open("score.json", "w", encoding="utf-8") as f:
+            json.dump(default_settings, f, indent=2, ensure_ascii=False)
+        return
+
+    with open("score.json", "r", encoding="utf-8") as f:
+        try:
+            score_data = json.load(f)
+        except Exception:
+            score_data = {}
+
+    filename = score_data.get("score", {}).get("filename", "score")
+
+    if filename == "score":
+        return
+
+    target_file = f"{filename}.json"
+    if not os.path.exists(target_file):
+        # Make sure to update in the nested "score" dict if present
+        if "score" in score_data and isinstance(score_data["score"], dict):
+            score_data["score"]["filename"] = "score"
+        else:
+            score_data["filename"] = "score"
+        with open("score.json", "w", encoding="utf-8") as f:
+            json.dump(score_data, f, indent=2, ensure_ascii=False)
+        return
+
+    with open(target_file, "r", encoding="utf-8") as f:
+        try:
+            imported_data = json.load(f)
+        except Exception:
+            imported_data = {}
+
+    with open("score.json", "w", encoding="utf-8") as f:
+        json.dump(imported_data, f, indent=2, ensure_ascii=False)
 from PyQt5.QtCore import QEvent
 import sys
 import asyncio
@@ -11,20 +58,42 @@ from PyQt5.QtWidgets import QDialog, QListWidget, QListWidgetItem
 from PyQt5.QtWidgets import QMenu, QAction, QMenuBar, QFileDialog, QMessageBox, QInputDialog
 import os
 
-# --- Проверка и инициализация score.json ---
-if not os.path.exists("score.json"):
-    default_data = {
-        "score": {
-            "filename": "score",
-            "mode": "Broadcast",
-            "ip": "127.0.0.1",
-            "universe": 0,
-            "start_addr": 1
-        },
-        "cues": {}
-    }
-    with open("score.json", "w", encoding="utf-8") as f:
-        json.dump(default_data, f, indent=2, ensure_ascii=False)
+
+def load_or_initialize_score():
+    # --- Ensure score.json exists with default structure ---
+    if not os.path.exists("score.json"):
+        with open("score.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "filename": "score",
+                "settings": {
+                    "mode": "Broadcast",
+                    "ip": "127.0.0.1",
+                    "universe": 0,
+                    "start_addr": 1
+                },
+                "cues": {}
+            }, f, indent=2, ensure_ascii=False)
+    # Now read score.json
+    with open("score.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+    filename = data.get("score", {}).get("filename", "score")
+    if filename != "score":
+        target_file = f"{filename}.json"
+        if os.path.exists(target_file):
+            with open(target_file, "r", encoding="utf-8") as f:
+                real_data = json.load(f)
+            with open("score.json", "w", encoding="utf-8") as fout:
+                json.dump(real_data, fout, indent=2, ensure_ascii=False)
+        else:
+            # Make sure to update in the nested "score" dict if present
+            if "score" in data and isinstance(data["score"], dict):
+                data["score"]["filename"] = "score"
+            else:
+                data["filename"] = "score"
+            with open("score.json", "w", encoding="utf-8") as fout:
+                json.dump(data, fout, indent=2, ensure_ascii=False)
+    # Optionally return data if needed
+    return
 
 # Глобальный перехватчик ошибок
 def exception_hook(exctype, value, traceback):
@@ -36,6 +105,43 @@ sys.excepthook = exception_hook
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # --- Проверка и инициализация score.json ---
+        import os
+        import json
+        score_file = "score.json"
+        if not os.path.exists(score_file):
+            default_data = {
+                "filename": "score",
+                "settings": {
+                    "mode": "Broadcast",
+                    "ip": "127.0.0.1",
+                    "universe": 0,
+                    "start_addr": 1
+                },
+                "cues": {}
+            }
+            with open(score_file, "w", encoding="utf-8") as f:
+                json.dump(default_data, f, indent=2, ensure_ascii=False)
+        # Проверяем значение "filename" и корректируем score.json при необходимости
+        with open(score_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        filename = data.get("score", {}).get("filename", "score")
+        if filename != "score":
+            target_file = f"{filename}.json"
+            if os.path.exists(target_file):
+                with open(target_file, "r", encoding="utf-8") as fsrc:
+                    file_data = json.load(fsrc)
+                data["cues"] = file_data.get("cues", {})
+                with open(score_file, "w", encoding="utf-8") as fdst:
+                    json.dump(data, fdst, indent=2, ensure_ascii=False)
+            else:
+                # Make sure to update in the nested "score" dict if present
+                if "score" in data and isinstance(data["score"], dict):
+                    data["score"]["filename"] = "score"
+                else:
+                    data["filename"] = "score"
+                with open(score_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
         # --- Меню Файл ---
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("Файл")
@@ -811,6 +917,7 @@ class ScoreWindow(QDialog):
 
 # TODO: сделать меню с сохранением шоу файла и загрузкой
 if __name__ == "__main__":
+    initialize_score_file()
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
