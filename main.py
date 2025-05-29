@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         save_as_action.triggered.connect(self.save_show_as)
         file_menu.addAction(save_as_action)
 
-        self.setWindowTitle("Мой пульт ArtNet")
+        self.setWindowTitle("ГрандПА")
         self.setGeometry(100, 100, 640, 300)
 
         # ArtNet settings defaults
@@ -321,7 +321,7 @@ class MainWindow(QMainWindow):
 
     def update_window_titles(self):
         name = self.loaded_show_name or "Без имени"
-        self.setWindowTitle(f"Мой пульт ArtNet - {name}")
+        self.setWindowTitle(f"ГрандПА - {name}")
         self.score_window.setWindowTitle(f"Партитура - {name}")
     def show_settings_dialog(self):
         dlg = QDialog(self)
